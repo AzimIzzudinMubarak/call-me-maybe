@@ -39,8 +39,8 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "flake8" },
-    { name = "mypy" },
+    { name = "flake8", specifier = ">=6.0.0" },
+    { name = "mypy", specifier = ">=1.0.0" },
 ]
 
 [[package]]
