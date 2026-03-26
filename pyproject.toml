@@ -8,8 +8,8 @@ dependencies = [
     "numpy",
 ]
 
-[tool.uv]
-dev-dependencies = [
-    "flake8",
-    "mypy",
+[dependency-groups]
+dev = [
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
 ]
