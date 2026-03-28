@@ -1,6 +1,5 @@
 """Test script to explore the LLM SDK functionality."""
 
-import json
 from llm_sdk import Small_LLM_Model
 
 
