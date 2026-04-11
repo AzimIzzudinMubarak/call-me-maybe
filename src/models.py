@@ -12,6 +12,10 @@ class FunctionDefinition(BaseModel):
     parameters: dict[str, FunctionParameter]
 
 
+class PromptInput(BaseModel):
+    prompt: str
+
+
 class FunctionCall(BaseModel):
     prompt: str
     name: str
