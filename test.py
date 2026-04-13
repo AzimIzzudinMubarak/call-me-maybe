@@ -26,6 +26,15 @@ functions = [
             "s": FunctionParameter(type="string")
         }
     ),
+    FunctionDefinition(
+        name="fn_substitute_string_with_regex",
+        description="Replace all occurrences matching a regex pattern in a string.",
+        parameters={
+            "source_string": FunctionParameter(type="string"),
+            "regex": FunctionParameter(type="string"),
+            "replacement": FunctionParameter(type="string")
+        }
+    ),
 ]
 
 model = Small_LLM_Model()
@@ -37,6 +46,7 @@ test_cases = [
     ("What is the sum of 265 and 345?",  "fn_add_numbers"),
     ("Greet john",                        "fn_greet"),
     ("Reverse the string 'hello'",        "fn_reverse_string"),
+    ("Replace all numbers in \"Hello 34 I'm 233 years old\" with NUMBERS", "fn_substitute_string_with_regex" )
 ]
 
 passed = 0

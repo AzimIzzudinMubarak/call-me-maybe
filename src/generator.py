@@ -1,8 +1,6 @@
-import json
 import numpy as np
 from typing import Any
 from llm_sdk import Small_LLM_Model
-
 
 from src.vocabulary import Vocabulary
 from src.models import FunctionDefinition, FunctionCall
@@ -32,18 +30,20 @@ class ConstrainedGenerator:
     def _build_function_prompt(self, user_prompt: str) -> str:
         """
         Build a full prompt with instructions and available functions
+        so the LLM understands the task and can select the right function.
         """
-        func_prompt = "Select the correct function and extract arguments.\n\nFunctions:\n"
-        for func in self._functions:
-            func_prompt += f"  {func.name}: {func.description}\n"
-            if func.parameters:
-                param_str = ", ".join(
-                    f"{k}=<{v.type}>" for k, v in func.parameters.items()
-                )
-                func_prompt += f"    Params: {param_str}\n"
-        func_prompt += f"\nRequest: {user_prompt}\n\nOutput JSON: "
+        functions_description = "\n".join([
+            f"- {fn.name}: {fn.description}"
+            for fn in self._functions
+        ])
 
-        return func_prompt
+        return (
+            f"You are a function calling assistant.\n"
+            f"Given a user request, select the most appropriate function.\n"
+            f"\nAvailable functions:\n{functions_description}"
+            f"\nUser request: {user_prompt}"
+            f"\nFunction name:"
+        )
 
     def _select_function(self, input_ids: list[int]) -> FunctionDefinition:
         """
@@ -57,7 +57,6 @@ class ConstrainedGenerator:
         4. Eliminate functions that don't match the chosen token
         5. Repeat until only one function remains
         """
-
         remaining: dict[str, list[int]] = {
             fn.name: self._vocab.encode_text(fn.name)
             for fn in self._functions
@@ -100,48 +99,77 @@ class ConstrainedGenerator:
         already_extracted: dict[str, Any]
     ) -> str:
         """
-        Build a prompt that tells the model which argument to generate next.
+        Build a prompt that guides the model to generate the next argument value.
         """
-
-        already_extracted_parameter = "".join([
-            f"- Parameter {name} ({fn.parameters[name].type}): {value}\n"
-            for name, value in already_extracted.items()
+        parameters_description = ", ".join([
+            f"{name} ({param.type})"
+            for name, param in fn.parameters.items()
         ])
+
+        # build the partial JSON with already extracted values
+        partial_json_parts = []
+        for name, value in already_extracted.items():
+            if isinstance(value, float):
+                partial_json_parts.append(f'"{name}": {value}')
+            else:
+                partial_json_parts.append(f'"{name}": "{value}"')
+        partial_json = ", ".join(partial_json_parts)
+
+        if partial_json:
+            json_so_far = f'{{{partial_json}, '
+        else:
+            json_so_far = '{'
 
         next_param = next(
             name for name in fn.parameters
             if name not in already_extracted
         )
+        json_so_far += f'"{next_param}": '
 
         return (
-            f"Extract the function arguments from the user request.\n"
-            f"User request: {prompt}\n"
+            f"Extract the function arguments from the user request in JSON.\n"
+            f"Prompt: {prompt.replace("'", '"')}\n"
             f"Function: {fn.name}\n"
             f"Description: {fn.description}\n"
-            f"{already_extracted_parameter}"
-            f"The value of '{next_param}' found in the user request is:"
+            f"Parameters: {parameters_description}\n"
+            f"Next parameter to extract: '{next_param}' from the user prompt.\n"
+            f"Output JSON:\n"
+            f"{json_so_far}"
         )
 
-    def _should_stop(self, param_type: str, generated_so_far: str, next_token: str) -> bool:
+    def _should_stop(
+        self,
+        param_type: str,
+        generated_so_far: str,
+        next_token: str
+    ) -> bool:
         """Decide whether generation should stop."""
         if param_type == "number":
-            candidate = (generated_so_far + next_token.replace('Ġ', '')).strip()
-            # allow these as valid starts of a number
-            if candidate in ('-', '.', '-.'):
-                return False
-            try:
-                float(candidate)
-                return False  # valid number so far → continue
-            except ValueError:
-                return True  # not a valid number → stop
+            # stop if next token is not a valid number character
+            if not all(c in '0123456789.-' for c in next_token):
+                return True
+            # stop if we already have a decimal point and enough digits
+            if '.' in generated_so_far:
+                decimal_part = generated_so_far.split('.')[1]
+                if len(decimal_part) >= 2:
+                    return True
+            return False
+
         elif param_type == "string":
-            stop_tokens = {'"', '\n', 'Ċ', ',', '}'}
-            return next_token in stop_tokens and len(generated_so_far) > 0
+            if len(generated_so_far) == 0:
+                return False
+            # stop if the token contains any stop character
+            stop_chars = {'"', '\n', 'Ċ', ',', '}'}
+            return any(c in next_token for c in stop_chars)
         return False
 
     def _generate_value(self, input_ids: list[int], param_type: str) -> str:
+        """
+        Run constrained generation loop for a single parameter value.
+        Stops when the value is complete based on its type.
+        """
         generated_text = ""
-        max_tokens = 50  # prevent infinite loop
+        max_tokens = 50
 
         for _ in range(max_tokens):
             if param_type == "number":
@@ -158,20 +186,26 @@ class ConstrainedGenerator:
             chosen_token_id = int(np.argmax(masked_logits))
             chosen_token_str = self._vocab.token_id_to_str(chosen_token_id)
 
+            if chosen_token_str is None:
+                break
+
             if self._should_stop(param_type, generated_text, chosen_token_str):
                 break
 
             generated_text += chosen_token_str
             input_ids.append(chosen_token_id)
-
         return generated_text.strip()
 
     def _extract_arguments(
-            self,
-            prompt: str,
-            fn: FunctionDefinition
+        self,
+        prompt: str,
+        fn: FunctionDefinition
     ) -> dict[str, Any]:
-        """Extract all arguments for the chosen function one by one."""
+        """
+        Extract all arguments one by one using a growing JSON prompt.
+        At each iteration the prompt already contains the partial JSON
+        so the model only needs to generate the next value.
+        """
         extracted: dict[str, Any] = {}
 
         for param_name, param_def in fn.parameters.items():
@@ -181,10 +215,15 @@ class ConstrainedGenerator:
             input_ids = self._vocab.encode_text(argument_prompt)
             raw_value = self._generate_value(input_ids, param_def.type)
 
-            if param_def.type == "number":
-                extracted[param_name] = float(raw_value)
-            elif param_def.type == "string":
-                extracted[param_name] = raw_value
+            try:
+                if param_def.type == "number":
+                    extracted[param_name] = round(float(raw_value), 10)
+                elif param_def.type == "string":
+                    cleaned = raw_value.replace('Ġ', ' ').strip().strip('"').strip("'")
+                    extracted[param_name] = cleaned
+            except ValueError:
+                print(f"Warning: could not convert '{raw_value}' for '{param_name}'")
+                extracted[param_name] = 0.0 if param_def.type == "number" else ""
 
         return extracted
 
@@ -192,7 +231,6 @@ class ConstrainedGenerator:
         """
         Given a natural language prompt, return a validated function call.
         """
-
         instructed_function_prompt = self._build_function_prompt(prompt)
         input_ids = self._vocab.encode_text(instructed_function_prompt)
         chosen_function = self._select_function(input_ids)

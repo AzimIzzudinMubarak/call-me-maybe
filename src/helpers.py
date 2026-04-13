@@ -1,5 +1,6 @@
 import argparse
 import json
+from pathlib import Path
 from typing import Any
 from pydantic import ValidationError
 
@@ -41,6 +42,20 @@ def load_json_file(file_path: str) -> Any:
         raise FileNotFoundError(f"Error: File not found: {file_path}")
     except json.JSONDecodeError as e:
         raise ValueError(f"Error: Invalid JSON in {file_path}: {e}")
+
+
+def save_json_file(file_path: str, data: Any) -> None:
+    """Save data to a JSON file with error handling."""
+    try:
+        output_dir = Path(file_path).parent
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2)
+
+        print(f"✅ Results saved to: {file_path}")
+    except Exception as e:
+        raise Exception(f"Error: Failed to save output: {e}")
 
 
 def validate_functions(raw: Any) -> list[FunctionDefinition]:

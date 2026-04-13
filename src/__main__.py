@@ -1,8 +1,11 @@
 import sys
+import json
+import os
 from llm_sdk import Small_LLM_Model
 
 from src.helpers import (parse_arguments, load_json_file, validate_functions,
                          validate_prompts)
+from src.generator import ConstrainedGenerator
 
 
 def main() -> None:
@@ -33,6 +36,27 @@ def main() -> None:
         print(f"Model loaded on device: {model._device}")
     except Exception as e:
         print(f"Failed to load model: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    generator = ConstrainedGenerator(model, function_definitions)
+
+    print("\n⚙️  Generating function calls...")
+    results = []
+    for i, prompt_input in enumerate(prompts):
+        print(f"  [{i + 1}/{len(prompts)}] {prompt_input.prompt}")
+        try:
+            result = generator.generate(prompt_input.prompt)
+            results.append(result.model_dump())
+        except Exception as e:
+            print(f"  Warning: failed to process prompt: {e}")
+
+    try:
+        os.makedirs(os.path.dirname(args.output), exist_ok=True)
+        with open(args.output, 'w', encoding='utf-8') as f:
+            json.dump(results, f, indent=2)
+        print(f"\n✅ Results saved to {args.output}")
+    except Exception as e:
+        print(f"Failed to save output: {e}", file=sys.stderr)
         sys.exit(1)
 
 
