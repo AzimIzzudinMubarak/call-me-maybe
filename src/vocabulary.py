@@ -34,15 +34,3 @@ class Vocabulary:
     def encode_text(self, text: str) -> list[int]:
         """Encode text to token IDs."""
         return self._model.encode(text)[0].tolist()
-
-    def get_number_tokens(self) -> list[int]:
-        """Return token IDs that are valid parts of a number."""
-        return [
-            token_id
-            for char in "0123456789.-"
-            if (token_id := self.token_str_to_id(char)) is not None
-        ]
-
-    def get_string_tokens(self) -> list[int]:
-        """Return all token IDs (strings can contain anything)."""
-        return list(self._id_to_token.keys())

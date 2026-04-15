@@ -137,32 +137,6 @@ class ConstrainedGenerator:
             f"{json_so_far}"
         )
 
-    def _should_stop(
-        self,
-        param_type: str,
-        generated_so_far: str,
-        next_token: str
-    ) -> bool:
-        """Decide whether generation should stop."""
-        if param_type == "number":
-            # stop if next token is not a valid number character
-            if not all(c in '0123456789.-' for c in next_token):
-                return True
-            # stop if we already have a decimal point and enough digits
-            if '.' in generated_so_far:
-                decimal_part = generated_so_far.split('.')[1]
-                if len(decimal_part) >= 2:
-                    return True
-            return False
-
-        elif param_type == "string":
-            if len(generated_so_far) == 0:
-                return False
-            # stop if the token contains any stop character
-            stop_chars = {'"', '\n', 'Ċ', ',', '}'}
-            return any(c in next_token for c in stop_chars)
-        return False
-
     def _generate_value(self, input_ids: list[int], param_type: str) -> str:
         """
         Run constrained generation loop for a single parameter value.
@@ -172,24 +146,23 @@ class ConstrainedGenerator:
         max_tokens = 50
 
         for _ in range(max_tokens):
+            logits = np.array(self._model.get_logits_from_input_ids(input_ids))
             if param_type == "number":
-                valid_tokens = self._vocab.get_number_tokens()
+                chosen_token_id = int(np.argmax(logits))
+                chosen_token_str = self._vocab.token_id_to_str(chosen_token_id)
+                if chosen_token_str and chosen_token_str not in "0123456789-.":
+                    break
             elif param_type == "string":
-                valid_tokens = self._vocab.get_string_tokens()
+                chosen_token_id = int(np.argmax(logits))
+                chosen_token_str = self._vocab.token_id_to_str(chosen_token_id)
+                print(chosen_token_str)
+                stop_char = {"\",", "\"}Ċ", ",", "}Ċ"}
+                if chosen_token_str and chosen_token_str in stop_char:
+                    break
             else:
                 raise ValueError(f"Unknown parameter type: {param_type}")
 
-            logits = np.array(self._model.get_logits_from_input_ids(input_ids),
-                              dtype=np.float32)
-            masked_logits = self._mask_tokens(logits, valid_tokens)
-
-            chosen_token_id = int(np.argmax(masked_logits))
-            chosen_token_str = self._vocab.token_id_to_str(chosen_token_id)
-
             if chosen_token_str is None:
-                break
-
-            if self._should_stop(param_type, generated_text, chosen_token_str):
                 break
 
             generated_text += chosen_token_str
@@ -217,9 +190,9 @@ class ConstrainedGenerator:
 
             try:
                 if param_def.type == "number":
-                    extracted[param_name] = round(float(raw_value), 10)
+                    extracted[param_name] = int(raw_value)
                 elif param_def.type == "string":
-                    cleaned = raw_value.replace('Ġ', ' ').strip().strip('"').strip("'")
+                    cleaned = raw_value.replace('Ġ', ' ').strip("\"' ")
                     extracted[param_name] = cleaned
             except ValueError:
                 print(f"Warning: could not convert '{raw_value}' for '{param_name}'")
