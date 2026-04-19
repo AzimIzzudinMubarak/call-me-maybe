@@ -18,15 +18,6 @@ class ConstrainedGenerator:
         self._vocab = Vocabulary(model)
         self._functions = functions
 
-    def _mask_tokens(self, logits: np.ndarray, valid: list[int]) -> np.ndarray:
-        """
-        Set all token logits to -inf except the valid ones.
-        This forces the model to only pick from valid tokens.
-        """
-        masked = np.full_like(logits, float('-inf'))
-        masked[valid] = logits[valid]
-        return masked
-
     def _build_function_prompt(self, user_prompt: str) -> str:
         """
         Build a full prompt with instructions and available functions
@@ -71,9 +62,9 @@ class ConstrainedGenerator:
                 if position < len(sequence)
             ]
 
-            logits = np.array(self._model.get_logits_from_input_ids(input_ids),
-                              dtype=np.float32)
-            masked_logits = self._mask_tokens(logits, valid_token)
+            logits = np.array(self._model.get_logits_from_input_ids(input_ids))
+            masked_logits = np.full_like(logits, float('-inf'))
+            masked_logits[valid_token] = logits[valid_token]
             chosen_token_id = int(np.argmax(masked_logits))
 
             remaining = {
@@ -147,16 +138,20 @@ class ConstrainedGenerator:
 
         for _ in range(max_tokens):
             logits = np.array(self._model.get_logits_from_input_ids(input_ids))
-            if param_type == "number":
-                chosen_token_id = int(np.argmax(logits))
-                chosen_token_str = self._vocab.token_id_to_str(chosen_token_id)
+            chosen_token_id = int(np.argmax(logits))
+            chosen_token_str = self._vocab.token_id_to_str(chosen_token_id)
+            if param_type == "integer":
                 if chosen_token_str and chosen_token_str not in "0123456789-.":
                     break
+            elif param_type == "number":
+                if chosen_token_str and chosen_token_str not in "0123456789-":
+                    break
             elif param_type == "string":
-                chosen_token_id = int(np.argmax(logits))
-                chosen_token_str = self._vocab.token_id_to_str(chosen_token_id)
-                print(chosen_token_str)
-                stop_char = {"\",", "\"}Ċ", ",", "}Ċ"}
+                stop_char = {
+                    "\",", "\"}Ċ", ",", "}Ċ",
+                    "\",Ċ", "\"}}Ċ", "}\",Ċ"
+                }
+                print("chosen: ", chosen_token_str)
                 if chosen_token_str and chosen_token_str in stop_char:
                     break
             else:
@@ -185,14 +180,17 @@ class ConstrainedGenerator:
             argument_prompt = self._build_argument_prompt(
                 prompt, fn, extracted
             )
+            print(f"\n\n{argument_prompt}\n\n")
             input_ids = self._vocab.encode_text(argument_prompt)
             raw_value = self._generate_value(input_ids, param_def.type)
 
             try:
-                if param_def.type == "number":
+                if param_def.type == "integer":
                     extracted[param_name] = int(raw_value)
+                elif param_def.type == "number":
+                    extracted[param_name] = float(raw_value)
                 elif param_def.type == "string":
-                    cleaned = raw_value.replace('Ġ', ' ').strip("\"' ")
+                    cleaned = raw_value.replace('Ġ', ' ').strip("\" ")
                     extracted[param_name] = cleaned
             except ValueError:
                 print(f"Warning: could not convert '{raw_value}' for '{param_name}'")
