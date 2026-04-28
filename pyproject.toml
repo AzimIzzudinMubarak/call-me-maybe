@@ -6,6 +6,9 @@ requires-python = ">=3.10"
 dependencies = [
     "pydantic",
     "numpy",
+    "transformers",
+    "torch",
+    "huggingface_hub",
 ]
 
 [dependency-groups]

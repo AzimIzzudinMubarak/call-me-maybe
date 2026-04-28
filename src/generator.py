@@ -48,6 +48,9 @@ class ConstrainedGenerator:
         4. Eliminate functions that don't match the chosen token
         5. Repeat until only one function remains
         """
+
+        current_ids = list(input_ids)
+
         remaining: dict[str, list[int]] = {
             fn.name: self._vocab.encode_text(fn.name)
             for fn in self._functions
@@ -62,7 +65,7 @@ class ConstrainedGenerator:
                 if position < len(sequence)
             ]
 
-            logits = np.array(self._model.get_logits_from_input_ids(input_ids))
+            logits = np.array(self._model.get_logits_from_input_ids(current_ids))
             masked_logits = np.full_like(logits, float('-inf'))
             masked_logits[valid_token] = logits[valid_token]
             chosen_token_id = int(np.argmax(masked_logits))
@@ -74,7 +77,7 @@ class ConstrainedGenerator:
                 and sequence[position] == chosen_token_id
             }
 
-            input_ids.append(chosen_token_id)
+            current_ids.append(chosen_token_id)
             position += 1
 
         chosen_name = next(iter(remaining))
@@ -92,15 +95,10 @@ class ConstrainedGenerator:
         """
         Build a prompt that guides the model to generate the next argument value.
         """
-        parameters_description = ", ".join([
-            f"{name} ({param.type})"
-            for name, param in fn.parameters.items()
-        ])
-
         # build the partial JSON with already extracted values
         partial_json_parts = []
         for name, value in already_extracted.items():
-            if isinstance(value, float):
+            if isinstance(value, (int, float)):
                 partial_json_parts.append(f'"{name}": {value}')
             else:
                 partial_json_parts.append(f'"{name}": "{value}"')
@@ -115,17 +113,18 @@ class ConstrainedGenerator:
             name for name in fn.parameters
             if name not in already_extracted
         )
-        json_so_far += f'"{next_param}": '
+
+        next_param_type = fn.parameters[next_param].type
+        if next_param_type == "string":
+            json_so_far += f'"{next_param}": "'
+        else:
+            json_so_far += f'"{next_param}": '
 
         return (
-            f"Extract the function arguments from the user request in JSON.\n"
-            f"Prompt: {prompt.replace("'", '"')}\n"
-            f"Function: {fn.name}\n"
-            f"Description: {fn.description}\n"
-            f"Parameters: {parameters_description}\n"
-            f"Next parameter to extract: '{next_param}' from the user prompt.\n"
-            f"Output JSON:\n"
-            f"{json_so_far}"
+            f"Task: extract the value for argument \"{next_param}\" from the user prompt.\n"
+            f"Extract only the argument value, not the full prompt text.\n"
+            f"User prompt: \"{prompt}\"\n"
+            f"OUTPUT JSON: {json_so_far}"
         )
 
     def _generate_value(self, input_ids: list[int], param_type: str) -> str:
@@ -134,31 +133,38 @@ class ConstrainedGenerator:
         Stops when the value is complete based on its type.
         """
         generated_text = ""
-        max_tokens = 50
+        max_tokens = 30
+        inner_quote_depth = 0
 
         for _ in range(max_tokens):
             logits = np.array(self._model.get_logits_from_input_ids(input_ids))
             chosen_token_id = int(np.argmax(logits))
             chosen_token_str = self._vocab.token_id_to_str(chosen_token_id)
+            print("chosen: ", chosen_token_str)
+            if chosen_token_str is None:
+                break
             if param_type == "integer":
-                if chosen_token_str and chosen_token_str not in "0123456789-.":
-                    break
-            elif param_type == "number":
                 if chosen_token_str and chosen_token_str not in "0123456789-":
                     break
+            elif param_type == "number":
+                if chosen_token_str and chosen_token_str not in "0123456789-.":
+                    break
             elif param_type == "string":
-                stop_char = {
-                    "\",", "\"}Ċ", ",", "}Ċ",
-                    "\",Ċ", "\"}}Ċ", "}\",Ċ"
-                }
-                print("chosen: ", chosen_token_str)
-                if chosen_token_str and chosen_token_str in stop_char:
+                if chosen_token_str == '"':
+                    if inner_quote_depth == 0:
+                        break  # real closing quote
+                    else:
+                        inner_quote_depth -= 1
+                elif chosen_token_str.startswith('Ġ"') and len(chosen_token_str) == 2:
+                    inner_quote_depth += 1
+                elif '"' in chosen_token_str and not chosen_token_str.startswith('Ġ'):
+                    before_quote = chosen_token_str.split('"')[0]
+                    generated_text += before_quote
+                    break
+                if any(c in chosen_token_str for c in ('\n', '\r')):
                     break
             else:
                 raise ValueError(f"Unknown parameter type: {param_type}")
-
-            if chosen_token_str is None:
-                break
 
             generated_text += chosen_token_str
             input_ids.append(chosen_token_id)
@@ -190,10 +196,13 @@ class ConstrainedGenerator:
                 elif param_def.type == "number":
                     extracted[param_name] = float(raw_value)
                 elif param_def.type == "string":
-                    cleaned = raw_value.replace('Ġ', ' ').strip("\" ")
+                    cleaned = raw_value.replace('Ġ', ' ').lstrip("\"").strip()
                     extracted[param_name] = cleaned
             except ValueError:
-                print(f"Warning: could not convert '{raw_value}' for '{param_name}'")
+                print(
+                    f"Warning: could not convert '{raw_value}' "
+                    f"for '{param_name}' (type={param_def.type})"
+                )
                 extracted[param_name] = 0.0 if param_def.type == "number" else ""
 
         return extracted
