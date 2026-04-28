@@ -40,13 +40,6 @@ class ConstrainedGenerator:
         """
         Use constrained decoding to select the correct function
         for the given prompt.
-
-        At each position:
-        1. Get valid token IDs for this position across all remaining functions
-        2. Mask all other logits to -inf
-        3. Pick the highest logit (argmax)
-        4. Eliminate functions that don't match the chosen token
-        5. Repeat until only one function remains
         """
 
         current_ids = list(input_ids)
@@ -65,7 +58,8 @@ class ConstrainedGenerator:
                 if position < len(sequence)
             ]
 
-            logits = np.array(self._model.get_logits_from_input_ids(current_ids))
+            logits = np.array(self._model.get_logits_from_input_ids(
+                current_ids))
             masked_logits = np.full_like(logits, float('-inf'))
             masked_logits[valid_token] = logits[valid_token]
             chosen_token_id = int(np.argmax(masked_logits))
@@ -93,10 +87,11 @@ class ConstrainedGenerator:
         already_extracted: dict[str, Any]
     ) -> str:
         """
-        Build a prompt that guides the model to generate the next argument value.
+        Build a prompt that guides the model to generate the next argument
+        value.
         """
-        # build the partial JSON with already extracted values
         partial_json_parts = []
+
         for name, value in already_extracted.items():
             if isinstance(value, (int, float)):
                 partial_json_parts.append(f'"{name}": {value}')
@@ -121,8 +116,8 @@ class ConstrainedGenerator:
             json_so_far += f'"{next_param}": '
 
         return (
-            f"Task: extract the value for argument \"{next_param}\" from the user prompt.\n"
-            f"Extract only the argument value, not the full prompt text.\n"
+            f"Task: extract argument values from the user prompt.\n"
+            f"Copy the raw value exactly as it appears in the user prompt.\n"
             f"User prompt: \"{prompt}\"\n"
             f"OUTPUT JSON: {json_so_far}"
         )
@@ -140,7 +135,7 @@ class ConstrainedGenerator:
             logits = np.array(self._model.get_logits_from_input_ids(input_ids))
             chosen_token_id = int(np.argmax(logits))
             chosen_token_str = self._vocab.token_id_to_str(chosen_token_id)
-            print("chosen: ", chosen_token_str)
+            # print("chosen: ", chosen_token_str)
             if chosen_token_str is None:
                 break
             if param_type == "integer":
@@ -152,12 +147,14 @@ class ConstrainedGenerator:
             elif param_type == "string":
                 if chosen_token_str == '"':
                     if inner_quote_depth == 0:
-                        break  # real closing quote
+                        break
                     else:
                         inner_quote_depth -= 1
-                elif chosen_token_str.startswith('Ġ"') and len(chosen_token_str) == 2:
+                elif (chosen_token_str.startswith('Ġ"')
+                      and len(chosen_token_str) == 2):
                     inner_quote_depth += 1
-                elif '"' in chosen_token_str and not chosen_token_str.startswith('Ġ'):
+                elif ('"' in chosen_token_str
+                      and not chosen_token_str.startswith('Ġ')):
                     before_quote = chosen_token_str.split('"')[0]
                     generated_text += before_quote
                     break
@@ -186,7 +183,6 @@ class ConstrainedGenerator:
             argument_prompt = self._build_argument_prompt(
                 prompt, fn, extracted
             )
-            print(f"\n\n{argument_prompt}\n\n")
             input_ids = self._vocab.encode_text(argument_prompt)
             raw_value = self._generate_value(input_ids, param_def.type)
 
@@ -197,13 +193,14 @@ class ConstrainedGenerator:
                     extracted[param_name] = float(raw_value)
                 elif param_def.type == "string":
                     cleaned = raw_value.replace('Ġ', ' ').lstrip("\"").strip()
+                    if fn.name == "fn_format_template":
+                        cleaned = cleaned.split(":")[-1].strip()
                     extracted[param_name] = cleaned
             except ValueError:
                 print(
                     f"Warning: could not convert '{raw_value}' "
                     f"for '{param_name}' (type={param_def.type})"
                 )
-                extracted[param_name] = 0.0 if param_def.type == "number" else ""
 
         return extracted
 
