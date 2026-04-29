@@ -1,5 +1,5 @@
 import json
-from typing import Optional
+from typing import Optional, cast
 from llm_sdk import Small_LLM_Model
 
 
@@ -33,4 +33,5 @@ class Vocabulary:
 
     def encode_text(self, text: str) -> list[int]:
         """Encode text to token IDs."""
-        return self._model.encode(text)[0].tolist()
+        encoded = self._model.encode(text)[0].tolist()
+        return cast(list[int], encoded)

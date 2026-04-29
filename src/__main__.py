@@ -52,8 +52,8 @@ def main() -> None:
 
     try:
         os.makedirs(os.path.dirname(args.output), exist_ok=True)
-        with open(args.output, 'w', encoding='utf-8') as f:
-            json.dump(results, f, indent=2)
+        with open(args.output, 'w', encoding='utf-8') as file:
+            json.dump(results, file, indent=2)
         print(f"\n✅ Results saved to {args.output}")
     except Exception as e:
         print(f"Failed to save output: {e}", file=sys.stderr)

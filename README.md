@@ -1,4 +1,4 @@
-# call me maybe
+# Call Me Maybe
 
 *This project has been created as part of the 42 curriculum by azmubara*
 
@@ -6,7 +6,7 @@
 
 ## Description
 
-**call me maybe** is a function calling tool that bridges the gap between natural language and machine-executable code. Given a plain-language request like `"What is the sum of 40 and 2?"`, the system does not return `42` — instead it produces a structured function call:
+**Call Me Maybe** is a function calling tool that bridges the gap between natural language and machine-executable code. Given a plain-language request like `"What is the sum of 40 and 2?"`, the system does not return `42` — instead it produces a structured function call:
 
 ```json
 {
@@ -141,14 +141,6 @@ The Qwen3-0.6B model has only ~500 million parameters, yet constrained decoding 
 1. **Happy-path tests**: Run the provided example files and verify that output JSON matches expected function names and typed argument values.
 2. **Edge-case prompts**: Test with empty strings, large numbers (e.g. `265 + 345`), special characters, and prompts that are semantically ambiguous between two functions.
 3. **Malformed input files**: Supply invalid JSON and missing files to confirm graceful error messages and clean exits.
-4. **Type enforcement**: Provide prompts whose numeric values include decimals for `integer`-typed parameters and verify the generator truncates correctly.
-5. **Schema compliance**: Parse every output file with a JSON validator and cross-check keys against the function definition schema.
-
-Tests can be run with pytest:
-
-```bash
-uv run pytest tests/
-```
 
 ---
 
@@ -220,7 +212,6 @@ uv run pytest tests/
 - [numpy documentation](https://numpy.org/doc/) — used for logit manipulation
 - [BPE tokenization explained](https://huggingface.co/learn/nlp-course/chapter6/5) — background on how tokens map to text
 - [Structured generation / constrained decoding overview](https://lmsys.org/blog/2024-02-05-compressed-fsm/) — FSM-based approach to constrained decoding
-- [Outlines library](https://github.com/outlines-dev/outlines) — reference implementation of constrained decoding (not used directly; forbidden by project rules)
 
 ### AI usage
 
